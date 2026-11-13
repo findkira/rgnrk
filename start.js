@@ -3,8 +3,7 @@ const { execSync } = require('child_process');
 const fs = require('fs');
 const path = require('path');
 
-const SESSION = "YOUR_SESSION_HERE";
-
+const SESSION = process.env.SESSION || "";
 if (!SESSION || SESSION === "YOUR_SESSION_HERE") {
   console.error('❌ Set your SESSION at the top of start.js first. Get one at /pair.');
   process.exit(1);
