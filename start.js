@@ -6,13 +6,14 @@ const { spawn } = require('child_process');
 
 const PORT = Number(process.env.PORT) || 10000;
 const SESSION = process.env.SESSION || '';
-const DATABASE_URL = process.env.DATABASE_URL || '';
+const DATABASE_URL = (process.env.DATABASE_URL || '').trim();
 const ROOT = process.cwd();
 const BOT_DIR = path.join(ROOT, 'raganork-md');
 const REPO = 'https://github.com/souravkl11/raganork-md.git';
 
 let botProcess = null;
 let botStatus = 'PREPARING';
+let databaseStatus = DATABASE_URL ? 'CONFIGURED' : 'NOT CONFIGURED';
 let shuttingDown = false;
 
 const startedAt = new Date().toISOString();
@@ -32,13 +33,18 @@ function run(command, args, options = {}) {
     child.on('error', reject);
 
     child.on('close', code => {
-      if (code === 0) resolve();
-      else reject(new Error(`${command} exited with code ${code}`));
+      if (code === 0) {
+        resolve();
+      } else {
+        reject(new Error(`${command} exited with code ${code}`));
+      }
     });
   });
 }
 
 function page() {
+  const dbColor = DATABASE_URL ? '#55e99b' : '#f0b65c';
+
   return `<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -105,7 +111,7 @@ text-align:left
 display:flex;
 justify-content:space-between;
 gap:12px;
-padding:9px 0;
+padding:10px 0;
 font-size:13px
 }
 .item span{color:#8d9aab}
@@ -135,6 +141,10 @@ Your WhatsApp bot service is running.
 <strong>${botStatus}</strong>
 </div>
 <div class="item">
+<span>Database</span>
+<strong style="color:${dbColor}">${databaseStatus}</strong>
+</div>
+<div class="item">
 <span>Platform</span>
 <strong>RENDER</strong>
 </div>
@@ -161,6 +171,7 @@ const server = http.createServer((req, res) => {
       service: 'Raganork-MD',
       web: 'ONLINE',
       bot: botStatus,
+      database: databaseStatus,
       uptime: Math.floor(process.uptime())
     }));
   }
@@ -181,20 +192,29 @@ const server = http.createServer((req, res) => {
 });
 
 server.listen(PORT, '0.0.0.0', () => {
-  log(`Web server listening on 0.0.0.0:${PORT}`);
+  log(`Web server listening on port ${PORT}`);
   log('Status page available.');
+  log(`Database: ${databaseStatus}`);
+
+  if (!DATABASE_URL) {
+    log('WARNING: DATABASE_URL is missing.');
+    log('Continuing without PostgreSQL configuration.');
+    log('The bot may require PostgreSQL during initialization.');
+  }
 });
 
 async function bootstrap() {
   try {
-    log('Starting deployment...');
+    log('Starting Raganork-MD deployment...');
 
     if (!SESSION) {
       throw new Error('SESSION environment variable is missing.');
     }
 
-    if (!DATABASE_URL) {
-      throw new Error('DATABASE_URL environment variable is missing.');
+    if (DATABASE_URL) {
+      log('PostgreSQL configuration detected.');
+    } else {
+      log('PostgreSQL skipped. Local storage mode requested.');
     }
 
     if (!fs.existsSync(path.join(BOT_DIR, 'package.json'))) {
@@ -229,18 +249,21 @@ async function bootstrap() {
     );
 
     if (!fs.existsSync(path.join(BOT_DIR, 'index.js'))) {
-      throw new Error('index.js not found in bot repository.');
+      throw new Error('index.js not found.');
     }
 
     const envValues = {
       SESSION,
-      DATABASE_URL,
       BOT_NAME: process.env.BOT_NAME || 'Raganork-MD',
       HANDLERS: process.env.HANDLERS || '.,!',
       SUDO: process.env.SUDO || '',
       LANGUAGE: process.env.LANGUAGE || 'en',
       TZ: process.env.TZ || 'Asia/Kolkata'
     };
+
+    if (DATABASE_URL) {
+      envValues.DATABASE_URL = DATABASE_URL;
+    }
 
     const envContent = Object.entries(envValues)
       .map(([key, value]) => {
@@ -326,11 +349,11 @@ async function bootstrap() {
       log('FFmpeg already exists.');
     }
 
-    if (!fs.existsSync(path.join(BOT_DIR, 'temp'))) {
-      fs.mkdirSync(path.join(BOT_DIR, 'temp'), {
-        recursive: true
-      });
-    }
+    const tempDir = path.join(BOT_DIR, 'temp');
+
+    fs.mkdirSync(tempDir, {
+      recursive: true
+    });
 
     const botEnv = {
       ...process.env,
@@ -338,6 +361,10 @@ async function bootstrap() {
       PATH: `${BOT_DIR}${path.delimiter}${process.env.PATH || ''}`,
       TEMP_DIR: './temp'
     };
+
+    if (!DATABASE_URL) {
+      delete botEnv.DATABASE_URL;
+    }
 
     log(`Starting ${packageData.name || 'Raganork-MD'}...`);
 
@@ -360,7 +387,7 @@ async function bootstrap() {
 
     botProcess.on('error', error => {
       botStatus = 'ERROR';
-      log(`Bot error: ${error.message}`);
+      log(`Bot process error: ${error.message}`);
     });
 
     botProcess.on('exit', (code, signal) => {
@@ -369,21 +396,16 @@ async function bootstrap() {
       log(`Bot exited. Code: ${code}, Signal: ${signal}`);
 
       if (!shuttingDown) {
-        shuttingDown = true;
-        server.close(() => {
-          process.exit(code || 1);
-        });
+        log('Web server will remain available.');
       }
     });
 
   } catch (error) {
     botStatus = 'ERROR';
+
     log(`Startup failed: ${error.message}`);
     console.error(error);
-
-    server.close(() => {
-      process.exit(1);
-    });
+    log('Web server remains available.');
   }
 }
 
@@ -393,7 +415,7 @@ function shutdown(signal) {
   shuttingDown = true;
   botStatus = 'STOPPING';
 
-  log(`${signal} received.`);
+  log(`${signal} received. Stopping service...`);
 
   if (botProcess && botProcess.exitCode === null) {
     botProcess.kill('SIGTERM');
