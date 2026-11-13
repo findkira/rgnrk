@@ -1,55 +1,167 @@
 
-/*
- * Raganork-MD Render Web Service
- * Single-file bootstrapper
- * Start: node start.js
- */
-
 const http = require('http');
 const fs = require('fs');
 const path = require('path');
-const { execFileSync, spawn } = require('child_process');
+const { spawn } = require('child_process');
 
-const PORT = Number(process.env.PORT) || 3000;
+const PORT = Number(process.env.PORT) || 10000;
 const SESSION = process.env.SESSION || '';
 const DATABASE_URL = process.env.DATABASE_URL || '';
-
-const REPO = 'https://github.com/souravkl11/raganork-md.git';
 const ROOT = process.cwd();
 const BOT_DIR = path.join(ROOT, 'raganork-md');
+const REPO = 'https://github.com/souravkl11/raganork-md.git';
 
 let botProcess = null;
-let botStatus = 'STARTING';
-let botError = null;
+let botStatus = 'PREPARING';
 let shuttingDown = false;
 
-// Simple console messages
+const startedAt = new Date().toISOString();
+
 function log(message) {
   console.log(`[RAGANORK] ${message}`);
 }
 
 function run(command, args, options = {}) {
-  log(`Running: ${command} ${args.join(' ')}`);
+  return new Promise((resolve, reject) => {
+    const child = spawn(command, args, {
+      cwd: options.cwd || ROOT,
+      env: options.env || process.env,
+      stdio: 'inherit'
+    });
 
-  execFileSync(command, args, {
-    stdio: 'inherit',
-    ...options
+    child.on('error', reject);
+
+    child.on('close', code => {
+      if (code === 0) resolve();
+      else reject(new Error(`${command} exited with code ${code}`));
+    });
   });
 }
 
-// HTTP SERVER
+function page() {
+  return `<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Raganork-MD</title>
+<style>
+*{box-sizing:border-box}
+body{
+margin:0;
+min-height:100vh;
+display:flex;
+align-items:center;
+justify-content:center;
+padding:20px;
+background:#080b12;
+color:#fff;
+font-family:Arial,sans-serif
+}
+.card{
+width:100%;
+max-width:390px;
+padding:32px 25px;
+background:#111722;
+border:1px solid #252d3b;
+border-radius:17px;
+text-align:center
+}
+.logo{
+width:55px;
+height:55px;
+margin:0 auto 20px;
+display:grid;
+place-items:center;
+background:#202c3d;
+border-radius:15px;
+font-size:25px;
+font-weight:bold
+}
+h2{margin:0;font-size:23px}
+.description{
+color:#9ba7b8;
+font-size:14px;
+line-height:1.6;
+margin:12px 0 22px
+}
+.status{
+display:inline-block;
+padding:9px 17px;
+border-radius:30px;
+background:#193c2b;
+color:#5ee69a;
+font-size:12px;
+font-weight:bold
+}
+.info{
+margin-top:25px;
+padding:15px;
+background:#0b1019;
+border-radius:11px;
+text-align:left
+}
+.item{
+display:flex;
+justify-content:space-between;
+gap:12px;
+padding:9px 0;
+font-size:13px
+}
+.item span{color:#8d9aab}
+.item strong{font-size:12px}
+.footer{
+margin-top:23px;
+font-size:11px;
+color:#687589
+}
+</style>
+</head>
+<body>
+<div class="card">
+<div class="logo">R</div>
+<h2>Raganork-MD</h2>
+<div class="description">
+Your WhatsApp bot service is running.
+</div>
+<div class="status">WEB SERVER ONLINE</div>
+<div class="info">
+<div class="item">
+<span>Web Server</span>
+<strong>ONLINE</strong>
+</div>
+<div class="item">
+<span>Bot Process</span>
+<strong>${botStatus}</strong>
+</div>
+<div class="item">
+<span>Platform</span>
+<strong>RENDER</strong>
+</div>
+<div class="item">
+<span>Started</span>
+<strong>${startedAt}</strong>
+</div>
+</div>
+<div class="footer">Powered by Raganork-MD</div>
+</div>
+</body>
+</html>`;
+}
+
 const server = http.createServer((req, res) => {
   res.setHeader('X-Content-Type-Options', 'nosniff');
 
   if (req.url === '/health') {
-    res.writeHead(botStatus === 'ONLINE' ? 200 : 503, {
+    res.writeHead(200, {
       'Content-Type': 'application/json'
     });
 
     return res.end(JSON.stringify({
       service: 'Raganork-MD',
-      status: botStatus,
-      bot: botProcess ? 'running' : 'not running'
+      web: 'ONLINE',
+      bot: botStatus,
+      uptime: Math.floor(process.uptime())
     }));
   }
 
@@ -58,107 +170,68 @@ const server = http.createServer((req, res) => {
       'Content-Type': 'text/html; charset=utf-8'
     });
 
-    return res.end(`<!DOCTYPE html>
-<html>
-<head>
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Raganork-MD</title>
-<style>
-* { box-sizing: border-box; }
-body {
-  margin: 0;
-  min-height: 100vh;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  background: #080b12;
-  color: #fff;
-  font-family: Arial, sans-serif;
-}
-.card {
-  width: min(90%, 420px);
-  padding: 35px 25px;
-  border: 1px solid #252b38;
-  border-radius: 18px;
-  background: #111722;
-  text-align: center;
-}
-h1 { font-size: 25px; margin: 0 0 12px; }
-p { color: #9ca8b9; line-height: 1.6; }
-.status {
-  display: inline-block;
-  padding: 9px 16px;
-  border-radius: 30px;
-  background: #193d2c;
-  color: #55e99b;
-  font-size: 13px;
-  font-weight: bold;
-  margin: 15px 0;
-}
-.footer {
-  margin-top: 25px;
-  font-size: 12px;
-  color: #697588;
-}
-</style>
-</head>
-<body>
-<div class="card">
-  <h1>Raganork-MD</h1>
-  <p>WhatsApp Bot Control Server</p>
-  <div class="status">${botStatus}</div>
-  <p>Web server is running successfully.</p>
-  <div class="footer">Powered by Raganork-MD</div>
-</div>
-</body>
-</html>`);
+    return res.end(page());
   }
 
   res.writeHead(404, {
     'Content-Type': 'text/plain'
   });
-  res.end('404 - Not Found');
+
+  res.end('404 Not Found');
 });
 
 server.listen(PORT, '0.0.0.0', () => {
-  log(`Web server listening on port ${PORT}`);
-  log(`Health endpoint: /health`);
+  log(`Web server listening on 0.0.0.0:${PORT}`);
+  log('Status page available.');
 });
 
-// BOT SETUP
 async function bootstrap() {
   try {
-    log('Preparing deployment...');
+    log('Starting deployment...');
 
-    // Check environment variables
     if (!SESSION) {
       throw new Error('SESSION environment variable is missing.');
     }
 
     if (!DATABASE_URL) {
-      throw new Error('DATABASE_URL is missing. Configure Render PostgreSQL.');
+      throw new Error('DATABASE_URL environment variable is missing.');
     }
 
-    // Clone bot repository
     if (!fs.existsSync(path.join(BOT_DIR, 'package.json'))) {
       if (fs.existsSync(BOT_DIR)) {
-        fs.rmSync(BOT_DIR, { recursive: true, force: true });
+        fs.rmSync(BOT_DIR, {
+          recursive: true,
+          force: true
+        });
       }
 
       log('Cloning Raganork-MD...');
-      run('git', ['clone', '--depth', '1', REPO, BOT_DIR]);
+
+      await run('git', [
+        'clone',
+        '--depth',
+        '1',
+        REPO,
+        BOT_DIR
+      ]);
     } else {
-      log('Raganork-MD source already exists.');
+      log('Bot repository already exists.');
     }
 
-    // Validate repository
-    const packageJson = path.join(BOT_DIR, 'package.json');
+    const packageFile = path.join(BOT_DIR, 'package.json');
 
-    if (!fs.existsSync(packageJson)) {
-      throw new Error('Raganork-MD package.json not found.');
+    if (!fs.existsSync(packageFile)) {
+      throw new Error('package.json not found.');
     }
 
-    // Write .env
+    const packageData = JSON.parse(
+      fs.readFileSync(packageFile, 'utf8')
+    );
+
+    if (!fs.existsSync(path.join(BOT_DIR, 'index.js'))) {
+      throw new Error('index.js not found in bot repository.');
+    }
+
     const envValues = {
       SESSION,
       DATABASE_URL,
@@ -170,7 +243,9 @@ async function bootstrap() {
     };
 
     const envContent = Object.entries(envValues)
-      .map(([key, value]) => `${key}=${JSON.stringify(String(value))}`)
+      .map(([key, value]) => {
+        return `${key}=${JSON.stringify(String(value))}`;
+      })
       .join('\n') + '\n';
 
     fs.writeFileSync(
@@ -179,45 +254,50 @@ async function bootstrap() {
       { mode: 0o600 }
     );
 
-    log('.env configuration created.');
+    log('Environment configuration created.');
 
-    // Install Yarn dependencies without global installation
-    log('Installing dependencies with Yarn...');
+    log('Installing Yarn dependencies...');
 
-    run('npx', [
+    await run('npx', [
       '--yes',
       '--package=yarn@1.22.22',
-      '--',
       'yarn',
       'install',
       '--ignore-engines',
       '--network-concurrency',
       '1'
-    ], { cwd: BOT_DIR });
+    ], {
+      cwd: BOT_DIR
+    });
 
     log('Dependencies installed.');
 
-    // Install FFmpeg
     const ffmpegPath = path.join(BOT_DIR, 'ffmpeg');
 
     if (!fs.existsSync(ffmpegPath)) {
       if (process.platform !== 'linux' || process.arch !== 'x64') {
-        throw new Error('This FFmpeg download requires Linux x64.');
+        throw new Error('FFmpeg installer supports Linux x64 only.');
       }
 
       log('Downloading FFmpeg...');
 
       const archive = path.join(BOT_DIR, 'ffmpeg.tar.xz');
 
-      run('curl', [
+      await run('curl', [
         '-fL',
-        '--retry', '3',
+        '--retry',
+        '3',
         'https://johnvansickle.com/ffmpeg/releases/ffmpeg-release-amd64-static.tar.xz',
         '-o',
         archive
       ]);
 
-      run('tar', ['-xJf', archive], { cwd: BOT_DIR });
+      await run('tar', [
+        '-xJf',
+        archive,
+        '-C',
+        BOT_DIR
+      ]);
 
       const ffmpegDir = fs.readdirSync(BOT_DIR).find(name =>
         /^ffmpeg-.*-static$/.test(name)
@@ -234,10 +314,10 @@ async function bootstrap() {
 
       fs.chmodSync(ffmpegPath, 0o755);
 
-      fs.rmSync(path.join(BOT_DIR, ffmpegDir), {
-        recursive: true,
-        force: true
-      });
+      fs.rmSync(
+        path.join(BOT_DIR, ffmpegDir),
+        { recursive: true, force: true }
+      );
 
       fs.rmSync(archive, { force: true });
 
@@ -246,15 +326,20 @@ async function bootstrap() {
       log('FFmpeg already exists.');
     }
 
-    // Make FFmpeg available to the bot
+    if (!fs.existsSync(path.join(BOT_DIR, 'temp'))) {
+      fs.mkdirSync(path.join(BOT_DIR, 'temp'), {
+        recursive: true
+      });
+    }
+
     const botEnv = {
       ...process.env,
+      ...envValues,
       PATH: `${BOT_DIR}${path.delimiter}${process.env.PATH || ''}`,
-      TZ: envValues.TZ
+      TEMP_DIR: './temp'
     };
 
-    // Start bot directly (no PM2 daemon)
-    log('Starting Raganork-MD...');
+    log(`Starting ${packageData.name || 'Raganork-MD'}...`);
 
     botStatus = 'STARTING';
 
@@ -269,48 +354,48 @@ async function bootstrap() {
     );
 
     botProcess.on('spawn', () => {
-      botStatus = 'ONLINE';
-      log('Raganork-MD process started.');
+      botStatus = 'PROCESS RUNNING';
+      log('Bot process started.');
     });
 
     botProcess.on('error', error => {
       botStatus = 'ERROR';
-      botError = error.message;
-      log(`Bot process error: ${error.message}`);
+      log(`Bot error: ${error.message}`);
     });
 
     botProcess.on('exit', (code, signal) => {
       botStatus = 'OFFLINE';
 
-      log(`Bot stopped. Code: ${code}, Signal: ${signal}`);
+      log(`Bot exited. Code: ${code}, Signal: ${signal}`);
 
       if (!shuttingDown) {
-        process.exitCode = code || 1;
-        server.close();
+        shuttingDown = true;
+        server.close(() => {
+          process.exit(code || 1);
+        });
       }
     });
 
   } catch (error) {
     botStatus = 'ERROR';
-    botError = error.message;
+    log(`Startup failed: ${error.message}`);
+    console.error(error);
 
-    console.error('[RAGANORK ERROR]', error);
-
-    process.exitCode = 1;
-    server.close();
+    server.close(() => {
+      process.exit(1);
+    });
   }
 }
 
-// Graceful shutdown
 function shutdown(signal) {
   if (shuttingDown) return;
 
   shuttingDown = true;
   botStatus = 'STOPPING';
 
-  log(`${signal} received. Stopping bot...`);
+  log(`${signal} received.`);
 
-  if (botProcess && !botProcess.killed) {
+  if (botProcess && botProcess.exitCode === null) {
     botProcess.kill('SIGTERM');
   }
 
@@ -319,7 +404,7 @@ function shutdown(signal) {
   });
 
   setTimeout(() => {
-    if (botProcess && !botProcess.killed) {
+    if (botProcess && botProcess.exitCode === null) {
       botProcess.kill('SIGKILL');
     }
 
@@ -330,5 +415,4 @@ function shutdown(signal) {
 process.on('SIGTERM', () => shutdown('SIGTERM'));
 process.on('SIGINT', () => shutdown('SIGINT'));
 
-// Start setup
 bootstrap();
