@@ -1,0 +1,20 @@
+
+services:
+  - type: web
+    name: raganork-md
+    runtime: docker
+    plan: starter
+    dockerfilePath: ./Dockerfile
+    healthCheckPath: /health
+    envVars:
+      - key: SESSION
+        sync: false
+
+      - key: HANDLERS
+        value: ".,"
+
+      - key: USE_SERVER
+        value: "true"
+
+      - key: NODE_ENV
+        value: production
