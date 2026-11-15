@@ -9,12 +9,9 @@ services:
     envVars:
       - key: SESSION
         sync: false
-
       - key: HANDLERS
         value: ".,"
-
-      - key: USE_SERVER
-        value: "true"
-
       - key: NODE_ENV
         value: production
+      - key: TZ
+        value: Asia/Kolkata
